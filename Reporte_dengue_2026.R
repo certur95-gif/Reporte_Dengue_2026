@@ -681,11 +681,19 @@ if (nrow(raw) == 0) stop("El archivo no contiene registros.") # Validación de d
 dat <- build_dataset(raw, cols, examenes_permitidos, lab_destino_global) # Construir dataset filtrado.
 
 dat <- add_epi(dat, "fecha_coleccion", week_system = week_system) # Agregar SE y año.
-dat <- dat %>% # Agregar SE y año de verificación.
-  mutate( # Crear columnas de verificación.
-    se_verif = if_else(week_system == "ISO", lubridate::isoweek(fecha_verificacion), lubridate::epiweek(fecha_verificacion)), # SE verificación.
-    anio_verif = if_else(week_system == "ISO", lubridate::isoyear(fecha_verificacion), lubridate::epiyear(fecha_verificacion)) # Año verificación.
-  ) # Fin de mutate.
+if (week_system == "ISO") { # Crear SE/año con ISO.
+  dat <- dat %>% # Agregar SE y año de verificación.
+    mutate( # Crear columnas de verificación.
+      se_verif = lubridate::isoweek(fecha_verificacion), # SE verificación.
+      anio_verif = lubridate::isoyear(fecha_verificacion) # Año verificación.
+    ) # Fin de mutate.
+} else { # Crear SE/año con MMWR.
+  dat <- dat %>% # Agregar SE y año de verificación.
+    mutate( # Crear columnas de verificación.
+      se_verif = lubridate::epiweek(fecha_verificacion), # SE verificación.
+      anio_verif = lubridate::epiyear(fecha_verificacion) # Año verificación.
+    ) # Fin de mutate.
+} # Fin de condición.
 
 context <- setup_report_context(dat, week_system, incluir_anio_en_carpeta) # Configurar carpeta y SE.
 
