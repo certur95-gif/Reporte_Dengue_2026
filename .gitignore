@@ -1,0 +1,11 @@
+.Rproj.user/
+.Rhistory
+.RData
+.RDataTmp
+.Ruserdata
+.Renviron
+.Rbuildignore
+*.RData
+*.Rhistory
+.DS_Store
+Thumbs.db
