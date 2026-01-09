@@ -290,8 +290,8 @@ build_dataset <- function(raw, cols, examenes_permitidos, lab_destino_global) { 
   dat # Retornar dataset filtrado.
 } # Fin de build_dataset.
 
-setup_report_context <- function(dat, week_system, incluir_anio_en_carpeta) { # Configurar contexto del reporte.
-  fecha_max <- max(dat$fecha_verificacion, na.rm = TRUE) # Fecha máxima disponible.
+setup_report_context <- function(dat, date_col, week_system, incluir_anio_en_carpeta) { # Configurar contexto del reporte.
+  fecha_max <- max(dat[[date_col]], na.rm = TRUE) # Fecha máxima disponible.
   se_reporte <- if (week_system == "ISO") lubridate::isoweek(fecha_max) else lubridate::epiweek(fecha_max) # Semana de reporte.
   anio_rep <- if (week_system == "ISO") lubridate::isoyear(fecha_max) else lubridate::epiyear(fecha_max) # Año del reporte.
   carpeta <- if (incluir_anio_en_carpeta) sprintf("%d_SE %02d", anio_rep, se_reporte) else sprintf("SE %02d", se_reporte) # Nombre de carpeta.
@@ -322,18 +322,25 @@ create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_report
     tidyr::complete(se = 1:53, fill = list(NEGATIVO = 0, POSITIVO = 0)) %>% # Completar semanas.
     mutate(total = NEGATIVO + POSITIVO, IP = if_else(total > 0, 100 * POSITIVO / total, NA_real_)) %>% # Recalcular tras completar.
     ungroup() # Desagrupar.
-  sem_plot <- sem %>% filter(anio == g1_anio, se <= se_reporte) # Filtrar para gráfico.
-  if (!is.null(g1_se_inicio)) sem_plot <- sem_plot %>% filter(se >= g1_se_inicio) # Aplicar semana de inicio.
+  max_anio_g1 <- max(g1_anio, na.rm = TRUE) # Año máximo para gráfico.
+  sem_plot <- sem %>% # Filtrar para gráfico.
+    filter(anio < max_anio_g1 | (anio == max_anio_g1 & se <= se_reporte)) # Incluir años previos y cortar año actual.
+  if (!is.null(g1_se_inicio)) { # Aplicar semana de inicio solo para año actual.
+    sem_plot <- sem_plot %>% filter(anio < max_anio_g1 | se >= g1_se_inicio) # Mantener años previos completos.
+  } # Fin filtro se inicio.
   if (nrow(sem_plot) == 0) stop("Gráfico 1: el filtro dejó el dataset vacío (revisa año/SE inicio).") # Error si no hay datos.
+  sem_plot <- sem_plot %>% # Ordenar para continuidad entre años.
+    arrange(anio, se) %>% # Ordenar por año y semana.
+    mutate(se_label = sprintf("%02d\n%d", se, anio)) # Etiqueta SE con año.
   bars <- sem_plot %>% # Preparar barras.
-    select(se, NEGATIVO, POSITIVO) %>% # Seleccionar columnas.
+    select(se_label, NEGATIVO, POSITIVO) %>% # Seleccionar columnas.
     pivot_longer(cols = c(NEGATIVO, POSITIVO), names_to = "tipo", values_to = "n") # Pasar a formato largo.
   max_count <- max(bars$n, na.rm = TRUE) # Máximo de barras.
   max_ip <- max(sem_plot$IP, na.rm = TRUE) # Máximo de IP.
   scale_factor <- ifelse(is.finite(max_ip) && max_ip > 0, max_count / max_ip, 1) # Factor de escala.
-  se_levels <- sort(unique(sem_plot$se)) # Niveles de semana.
-  bars <- bars %>% mutate(se_f = factor(se, levels = se_levels)) # Factor para barras.
-  sem_plot <- sem_plot %>% mutate(se_f = factor(se, levels = se_levels)) # Factor para línea.
+  se_levels <- unique(sem_plot$se_label) # Niveles de semana.
+  bars <- bars %>% mutate(se_f = factor(se_label, levels = se_levels)) # Factor para barras.
+  sem_plot <- sem_plot %>% mutate(se_f = factor(se_label, levels = se_levels)) # Factor para línea.
   sem_plot <- sem_plot %>% mutate( # Marcar máximo IP.
     es_max_ip = IP == max(IP, na.rm = TRUE), # Indicador de máximo.
     etiqueta_ip = if_else(es_max_ip, sprintf("IP: %.1f%%", IP), NA_character_) # Etiqueta para máximo.
@@ -687,24 +694,21 @@ dat <- dat %>% # Agregar SE y año de verificación.
     anio_verif = if_else(week_system == "ISO", lubridate::isoyear(fecha_verificacion), lubridate::epiyear(fecha_verificacion)) # Año verificación.
   ) # Fin de mutate.
 
-context <- setup_report_context(dat, week_system, incluir_anio_en_carpeta) # Configurar carpeta y SE.
+context <- setup_report_context(dat, "fecha_coleccion", week_system, incluir_anio_en_carpeta) # Configurar carpeta y SE.
 
 se_reporte <- context$se_reporte # Semana de reporte.
 anio_rep <- context$anio_rep # Año de reporte.
 carpeta <- context$carpeta # Carpeta de salida.
 
-dat <- dat %>% # Filtrar por semana de verificación del reporte.
-  filter(se_verif == se_reporte, anio_verif == anio_rep) # Mantener solo verificados en la SE del reporte.
-
-if (nrow(dat) == 0) stop("No hay registros verificados en la SE del reporte (Fecha Verificación).") # Validar datos tras filtro.
-
-se_reporte_coleccion <- max(dat$se, na.rm = TRUE) # Semana máxima según Fecha Colección.
-anio_coleccion_rep <- max(dat$anio, na.rm = TRUE) # Año máximo según Fecha Colección.
+se_reporte_coleccion <- se_reporte # Semana máxima según Fecha Colección.
+anio_coleccion_rep <- anio_rep # Año máximo según Fecha Colección.
 
 # Resolver AUTO en configuraciones # Comentario de paso.
 g1_anio <- resolve_auto(g1_anio, anio_coleccion_rep) # Resolver año gráfico 1.
 g2_anio <- resolve_auto(g2_anio, anio_coleccion_rep) # Resolver año gráfico 2.
 tabprov_anio <- resolve_auto(tabprov_anio, anio_coleccion_rep) # Resolver año tabla provincia.
+if (is.null(tabprov_se_inicio)) tabprov_se_inicio <- 1 # Usar desde SE 01.
+if (is.null(tabprov_se_fin)) tabprov_se_fin <- se_reporte_coleccion # Usar hasta SE actual.
 tabse_anio <- resolve_auto(tabse_anio, anio_coleccion_rep) # Resolver año tabla SE.
 tabse_se <- resolve_auto(tabse_se, se_reporte_coleccion) # Resolver semana tabla SE.
 
@@ -737,7 +741,7 @@ tabla_se_final <- create_table_se(dat, cols$col_micro, cols$col_estab, tabse_ani
 # --------------------------- # Separador visual.
 
 message("OK. Carpeta del reporte: ", carpeta) # Mensaje carpeta.
-message("SE del reporte (según max Fecha Verificación): SE ", sprintf("%02d", se_reporte), " - Año ", anio_rep) # Mensaje SE/año.
+message("SE del reporte (según max Fecha Colección): SE ", sprintf("%02d", se_reporte), " - Año ", anio_rep) # Mensaje SE/año.
 message("SE máxima en datos (según Fecha Colección): SE ", sprintf("%02d", se_reporte_coleccion), " - Año ", anio_coleccion_rep) # Mensaje SE colección.
 message("Gráfico 1: ", out_g1) # Mensaje gráfico 1.
 message("Gráfico 2: ", out_g2) # Mensaje gráfico 2.
