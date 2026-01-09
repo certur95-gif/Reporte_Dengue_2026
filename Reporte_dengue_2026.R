@@ -46,7 +46,7 @@ incluir_anio_en_carpeta <- FALSE # Si TRUE incluye año en el nombre.
 
 # ------------- GRÁFICO 1 (IP% por SE) ------------- # Sección de gráfico 1.
 g1_anio <- "AUTO" # Año para gráfico 1 o "AUTO".
-g1_se_inicio <- 20 # Semana de inicio del gráfico 1.
+g1_se_inicio <- "AUTO" # Semana de inicio del gráfico 1 o "AUTO".
 # g1_se_inicio <- NULL # Usar NULL para no filtrar por semana de inicio.
 g1_unidad <- unidad_global # Unidad a utilizar en gráfico 1.
 
@@ -719,9 +719,8 @@ anio_coleccion_rep <- max(dat$anio, na.rm = TRUE) # Año máximo según Fecha Co
 
 # Resolver AUTO en configuraciones # Comentario de paso.
 g1_anio <- resolve_auto(g1_anio, anio_coleccion_rep) # Resolver año gráfico 1.
+g1_se_inicio <- resolve_auto(g1_se_inicio, min(dat$se, na.rm = TRUE)) # Resolver semana inicio gráfico 1.
 g2_anio <- resolve_auto(g2_anio, anio_coleccion_rep) # Resolver año gráfico 2.
-g2_se_inicio <- resolve_auto(g2_se_inicio, se_reporte_coleccion) # Resolver semana inicio gráfico 2.
-g2_se_fin <- resolve_auto(g2_se_fin, se_reporte_coleccion) # Resolver semana fin gráfico 2.
 tabprov_anio <- resolve_auto(tabprov_anio, anio_coleccion_rep) # Resolver año tabla provincia.
 tabse_anio <- resolve_auto(tabse_anio, anio_coleccion_rep) # Resolver año tabla SE.
 tabse_se <- resolve_auto(tabse_se, se_reporte_coleccion) # Resolver semana tabla SE.
