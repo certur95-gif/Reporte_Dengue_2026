@@ -46,14 +46,14 @@ incluir_anio_en_carpeta <- FALSE # Si TRUE incluye año en el nombre.
 
 # ------------- GRÁFICO 1 (IP% por SE) ------------- # Sección de gráfico 1.
 g1_anio <- "AUTO" # Año para gráfico 1 o "AUTO".
-g1_se_inicio <- 20 # Semana de inicio del gráfico 1.
+g1_se_inicio <- "AUTO" # Semana de inicio del gráfico 1 o "AUTO".
 # g1_se_inicio <- NULL # Usar NULL para no filtrar por semana de inicio.
 g1_unidad <- unidad_global # Unidad a utilizar en gráfico 1.
 
 # ------------- GRÁFICO 2 (Procesamiento por tipo de prueba) ------------- # Sección de gráfico 2.
 g2_anio <- "AUTO" # Año para gráfico 2 o "AUTO".
-g2_se_inicio <- NULL # Semana inicial para gráfico 2.
-g2_se_fin <- NULL # Semana final para gráfico 2.
+g2_se_inicio <- "AUTO" # Semana inicial para gráfico 2 o "AUTO".
+g2_se_fin <- "AUTO" # Semana final para gráfico 2 o "AUTO".
 g2_unidad <- "examen" # Unidad para gráfico 2.
 
 # Default: excluir LRNMZVIR # Laboratorios a excluir por defecto.
@@ -143,7 +143,11 @@ parse_excel_date <- function(x) { # Parsear fecha desde Excel.
   if (is.numeric(x)) return(as.Date(x, origin = "1899-12-30")) # Convertir fecha Excel numérica.
   as.Date(lubridate::parse_date_time( # Parsear texto con varios formatos.
     as.character(x), # Convertir a carácter.
-    orders = c("dmy", "dmY", "ymd", "Ymd", "d/m/Y", "Y-m-d", "d-m-Y", "Y/m/d"), # Formatos permitidos.
+    orders = c( # Formatos permitidos.
+      "dmy", "dmY", "ymd", "Ymd", "d/m/Y", "Y-m-d", "d-m-Y", "Y/m/d", # Fechas.
+      "ymd HMS", "Ymd HMS", "dmy HMS", "dmY HMS", "ymd HM", "Ymd HM", "dmy HM", "dmY HM", # Fechas con hora.
+      "d/m/Y HMS", "d/m/Y HM", "d-m-Y HMS", "d-m-Y HM", "Y/m/d HMS", "Y/m/d HM", "Y-m-d HMS", "Y-m-d HM" # Fechas con hora y separadores.
+    ), # Fin de formatos.
     tz = "UTC" # Zona horaria fija.
   )) # Fin del parseo.
 } # Fin de parse_excel_date.
@@ -692,11 +696,19 @@ if (nrow(raw) == 0) stop("El archivo no contiene registros.") # Validación de d
 dat <- build_dataset(raw, cols, examenes_permitidos, lab_destino_global) # Construir dataset filtrado.
 
 dat <- add_epi(dat, "fecha_coleccion", week_system = week_system) # Agregar SE y año.
-dat <- dat %>% # Agregar SE y año de verificación.
-  mutate( # Crear columnas de verificación.
-    se_verif = if_else(week_system == "ISO", lubridate::isoweek(fecha_verificacion), lubridate::epiweek(fecha_verificacion)), # SE verificación.
-    anio_verif = if_else(week_system == "ISO", lubridate::isoyear(fecha_verificacion), lubridate::epiyear(fecha_verificacion)) # Año verificación.
-  ) # Fin de mutate.
+if (week_system == "ISO") { # Crear SE/año con ISO.
+  dat <- dat %>% # Agregar SE y año de verificación.
+    mutate( # Crear columnas de verificación.
+      se_verif = lubridate::isoweek(fecha_verificacion), # SE verificación.
+      anio_verif = lubridate::isoyear(fecha_verificacion) # Año verificación.
+    ) # Fin de mutate.
+} else { # Crear SE/año con MMWR.
+  dat <- dat %>% # Agregar SE y año de verificación.
+    mutate( # Crear columnas de verificación.
+      se_verif = lubridate::epiweek(fecha_verificacion), # SE verificación.
+      anio_verif = lubridate::epiyear(fecha_verificacion) # Año verificación.
+    ) # Fin de mutate.
+} # Fin de condición.
 
 context <- setup_report_context(dat, week_system, incluir_anio_en_carpeta) # Configurar carpeta y SE.
 
