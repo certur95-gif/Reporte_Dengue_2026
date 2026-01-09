@@ -143,7 +143,10 @@ parse_excel_date <- function(x) { # Parsear fecha desde Excel.
   if (is.numeric(x)) return(as.Date(x, origin = "1899-12-30")) # Convertir fecha Excel numérica.
   as.Date(lubridate::parse_date_time( # Parsear texto con varios formatos.
     as.character(x), # Convertir a carácter.
-    orders = c("dmy", "dmY", "ymd", "Ymd", "d/m/Y", "Y-m-d", "d-m-Y", "Y/m/d"), # Formatos permitidos.
+    orders = c( # Formatos permitidos.
+      "dmy", "dmY", "ymd", "Ymd", "d/m/Y", "Y-m-d", "d-m-Y", "Y/m/d", # Fechas.
+      "ymd HMS", "Ymd HMS", "dmy HMS", "dmY HMS", "ymd HM", "Ymd HM", "dmy HM", "dmY HM" # Fechas con hora.
+    ), # Fin de formatos.
     tz = "UTC" # Zona horaria fija.
   )) # Fin del parseo.
 } # Fin de parse_excel_date.
