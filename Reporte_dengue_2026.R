@@ -322,18 +322,25 @@ create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_report
     tidyr::complete(se = 1:53, fill = list(NEGATIVO = 0, POSITIVO = 0)) %>% # Completar semanas.
     mutate(total = NEGATIVO + POSITIVO, IP = if_else(total > 0, 100 * POSITIVO / total, NA_real_)) %>% # Recalcular tras completar.
     ungroup() # Desagrupar.
-  sem_plot <- sem %>% filter(anio == g1_anio, se <= se_reporte) # Filtrar para gráfico.
-  if (!is.null(g1_se_inicio)) sem_plot <- sem_plot %>% filter(se >= g1_se_inicio) # Aplicar semana de inicio.
+  max_anio_g1 <- max(g1_anio, na.rm = TRUE) # Año máximo para gráfico.
+  sem_plot <- sem %>% # Filtrar para gráfico.
+    filter(anio < max_anio_g1 | (anio == max_anio_g1 & se <= se_reporte)) # Incluir años previos y cortar año actual.
+  if (!is.null(g1_se_inicio)) { # Aplicar semana de inicio solo para año actual.
+    sem_plot <- sem_plot %>% filter(anio < max_anio_g1 | se >= g1_se_inicio) # Mantener años previos completos.
+  } # Fin filtro se inicio.
   if (nrow(sem_plot) == 0) stop("Gráfico 1: el filtro dejó el dataset vacío (revisa año/SE inicio).") # Error si no hay datos.
+  sem_plot <- sem_plot %>% # Ordenar para continuidad entre años.
+    arrange(anio, se) %>% # Ordenar por año y semana.
+    mutate(se_label = sprintf("%02d\n%d", se, anio)) # Etiqueta SE con año.
   bars <- sem_plot %>% # Preparar barras.
-    select(se, NEGATIVO, POSITIVO) %>% # Seleccionar columnas.
+    select(se_label, NEGATIVO, POSITIVO) %>% # Seleccionar columnas.
     pivot_longer(cols = c(NEGATIVO, POSITIVO), names_to = "tipo", values_to = "n") # Pasar a formato largo.
   max_count <- max(bars$n, na.rm = TRUE) # Máximo de barras.
   max_ip <- max(sem_plot$IP, na.rm = TRUE) # Máximo de IP.
   scale_factor <- ifelse(is.finite(max_ip) && max_ip > 0, max_count / max_ip, 1) # Factor de escala.
-  se_levels <- sort(unique(sem_plot$se)) # Niveles de semana.
-  bars <- bars %>% mutate(se_f = factor(se, levels = se_levels)) # Factor para barras.
-  sem_plot <- sem_plot %>% mutate(se_f = factor(se, levels = se_levels)) # Factor para línea.
+  se_levels <- unique(sem_plot$se_label) # Niveles de semana.
+  bars <- bars %>% mutate(se_f = factor(se_label, levels = se_levels)) # Factor para barras.
+  sem_plot <- sem_plot %>% mutate(se_f = factor(se_label, levels = se_levels)) # Factor para línea.
   sem_plot <- sem_plot %>% mutate( # Marcar máximo IP.
     es_max_ip = IP == max(IP, na.rm = TRUE), # Indicador de máximo.
     etiqueta_ip = if_else(es_max_ip, sprintf("IP: %.1f%%", IP), NA_character_) # Etiqueta para máximo.
@@ -381,7 +388,11 @@ create_graph2 <- function(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs
         TRUE ~ examen_std # Por defecto.
       ) # Fin de case_when.
     ) %>% # Fin de mutate.
-    filter(clasif %in% c("NEGATIVO", "POSITIVO")) # Filtrar negativos y positivos.
+    filter(clasif %in% c("NEGATIVO", "POSITIVO")) %>% # Filtrar negativos y positivos.
+    mutate( # Usar semana/año de verificación para filtros del gráfico 2.
+      se = se_verif, # SE según fecha de verificación.
+      anio = anio_verif # Año según fecha de verificación.
+    ) # Fin de mutate.
   anio_f_g2 <- if (is.null(g2_anio)) NULL else g2_anio # Definir año.
   dat_g2 <- apply_filters(dat_g2, anio_sel = anio_f_g2, se_inicio = g2_se_inicio, se_fin = g2_se_fin, labs_excluir = g2_excluir_labs, labs_solo = g2_lab_solo) # Aplicar filtros.
   if (nrow(dat_g2) == 0) stop("Gráfico 2: no quedan datos tras filtros (año/SE/labs).") # Error si no hay datos.
@@ -703,7 +714,7 @@ anio_coleccion_rep <- max(dat$anio, na.rm = TRUE) # Año máximo según Fecha Co
 
 # Resolver AUTO en configuraciones # Comentario de paso.
 g1_anio <- resolve_auto(g1_anio, anio_coleccion_rep) # Resolver año gráfico 1.
-g2_anio <- resolve_auto(g2_anio, anio_coleccion_rep) # Resolver año gráfico 2.
+g2_anio <- resolve_auto(g2_anio, anio_rep) # Resolver año gráfico 2 (verificación).
 tabprov_anio <- resolve_auto(tabprov_anio, anio_coleccion_rep) # Resolver año tabla provincia.
 tabse_anio <- resolve_auto(tabse_anio, anio_coleccion_rep) # Resolver año tabla SE.
 tabse_se <- resolve_auto(tabse_se, se_reporte_coleccion) # Resolver semana tabla SE.
