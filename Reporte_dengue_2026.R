@@ -52,8 +52,8 @@ g1_unidad <- unidad_global # Unidad a utilizar en gráfico 1.
 
 # ------------- GRÁFICO 2 (Procesamiento por tipo de prueba) ------------- # Sección de gráfico 2.
 g2_anio <- "AUTO" # Año para gráfico 2 o "AUTO".
-g2_se_inicio <- NULL # Semana inicial para gráfico 2.
-g2_se_fin <- NULL # Semana final para gráfico 2.
+g2_se_inicio <- "AUTO" # Semana inicial para gráfico 2 o "AUTO".
+g2_se_fin <- "AUTO" # Semana final para gráfico 2 o "AUTO".
 g2_unidad <- "examen" # Unidad para gráfico 2.
 
 # Default: excluir LRNMZVIR # Laboratorios a excluir por defecto.
@@ -326,8 +326,12 @@ create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_report
     tidyr::complete(se = 1:53, fill = list(NEGATIVO = 0, POSITIVO = 0)) %>% # Completar semanas.
     mutate(total = NEGATIVO + POSITIVO, IP = if_else(total > 0, 100 * POSITIVO / total, NA_real_)) %>% # Recalcular tras completar.
     ungroup() # Desagrupar.
-  sem_plot <- sem %>% filter(anio == g1_anio, se <= se_reporte) # Filtrar para gráfico.
-  if (!is.null(g1_se_inicio)) sem_plot <- sem_plot %>% filter(se >= g1_se_inicio) # Aplicar semana de inicio.
+  if (!is.null(g1_se_inicio) && se_reporte < g1_se_inicio) { # Cruce de año: usar tramo final del año previo.
+    sem_plot <- sem %>% filter((anio == g1_anio - 1 & se >= g1_se_inicio) | (anio == g1_anio & se <= se_reporte)) # Filtrar para gráfico.
+  } else { # Mismo año.
+    sem_plot <- sem %>% filter(anio == g1_anio, se <= se_reporte) # Filtrar para gráfico.
+    if (!is.null(g1_se_inicio)) sem_plot <- sem_plot %>% filter(se >= g1_se_inicio) # Aplicar semana de inicio.
+  } # Fin de condición.
   if (nrow(sem_plot) == 0) stop("Gráfico 1: el filtro dejó el dataset vacío (revisa año/SE inicio).") # Error si no hay datos.
   bars <- sem_plot %>% # Preparar barras.
     select(se, NEGATIVO, POSITIVO) %>% # Seleccionar columnas.
