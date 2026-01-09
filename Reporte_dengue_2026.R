@@ -52,8 +52,8 @@ g1_unidad <- unidad_global # Unidad a utilizar en gráfico 1.
 
 # ------------- GRÁFICO 2 (Procesamiento por tipo de prueba) ------------- # Sección de gráfico 2.
 g2_anio <- "AUTO" # Año para gráfico 2 o "AUTO".
-g2_se_inicio <- NULL # Semana inicial para gráfico 2.
-g2_se_fin <- NULL # Semana final para gráfico 2.
+g2_se_inicio <- "AUTO" # Semana inicial para gráfico 2 o "AUTO".
+g2_se_fin <- "AUTO" # Semana final para gráfico 2 o "AUTO".
 g2_unidad <- "examen" # Unidad para gráfico 2.
 
 # Default: excluir LRNMZVIR # Laboratorios a excluir por defecto.
@@ -143,7 +143,11 @@ parse_excel_date <- function(x) { # Parsear fecha desde Excel.
   if (is.numeric(x)) return(as.Date(x, origin = "1899-12-30")) # Convertir fecha Excel numérica.
   as.Date(lubridate::parse_date_time( # Parsear texto con varios formatos.
     as.character(x), # Convertir a carácter.
-    orders = c("dmy", "dmY", "ymd", "Ymd", "d/m/Y", "Y-m-d", "d-m-Y", "Y/m/d"), # Formatos permitidos.
+    orders = c( # Formatos permitidos.
+      "dmy", "dmY", "ymd", "Ymd", "d/m/Y", "Y-m-d", "d-m-Y", "Y/m/d", # Fechas.
+      "ymd HMS", "Ymd HMS", "dmy HMS", "dmY HMS", "ymd HM", "Ymd HM", "dmy HM", "dmY HM", # Fechas con hora.
+      "d/m/Y HMS", "d/m/Y HM", "d-m-Y HMS", "d-m-Y HM", "Y/m/d HMS", "Y/m/d HM", "Y-m-d HMS", "Y-m-d HM" # Fechas con hora y separadores.
+    ), # Fin de formatos.
     tz = "UTC" # Zona horaria fija.
   )) # Fin del parseo.
 } # Fin de parse_excel_date.
@@ -232,6 +236,7 @@ load_raw_data <- function(archivo, hoja) { # Función para leer Excel.
 
 detect_columns <- function(raw) { # Detectar columnas requeridas y opcionales.
   col_fecha <- must_col(raw, c("Fecha Colección", "Fecha Coleccion"), "Fecha de colección") # Columna fecha.
+  col_fecha_verif <- must_col(raw, c("Fecha Verificación", "Fecha Verificacion"), "Fecha de verificación") # Columna fecha verificación.
   col_result <- must_col(raw, c("resultado"), "Resultado") # Columna resultado.
   col_examen <- must_col(raw, c("nombre de examen", "examen"), "Examen") # Columna examen.
   col_estatus <- must_col(raw, c("estatus resultado", "estado resultado", "estatus"), "Estatus") # Columna estatus.
@@ -242,6 +247,7 @@ detect_columns <- function(raw) { # Detectar columnas requeridas y opcionales.
   col_estab <- find_col(raw, c("Establecimiento de Origen", "IPRESS Origen", "Origen")) # Columna establecimiento.
   list( # Retornar lista de columnas.
     col_fecha = col_fecha, # Fecha.
+    col_fecha_verif = col_fecha_verif, # Fecha verificación.
     col_result = col_result, # Resultado.
     col_examen = col_examen, # Examen.
     col_estatus = col_estatus, # Estatus.
@@ -258,6 +264,7 @@ build_dataset <- function(raw, cols, examenes_permitidos, lab_destino_global) { 
   dat <- raw %>% # Iniciar pipeline.
     mutate( # Crear columnas estándar.
       fecha_coleccion = parse_excel_date(.data[[cols$col_fecha]]), # Parsear fecha.
+      fecha_verificacion = parse_excel_date(.data[[cols$col_fecha_verif]]), # Parsear fecha verificación.
       resultado_std = stringr::str_to_upper(stringr::str_squish(as.character(.data[[cols$col_result]]))), # Normalizar resultado.
       examen_std = stringr::str_to_upper(stringr::str_squish(as.character(.data[[cols$col_examen]]))), # Normalizar examen.
       examen_key = norm_txt(examen_std), # Normalizar examen para comparación.
@@ -265,7 +272,8 @@ build_dataset <- function(raw, cols, examenes_permitidos, lab_destino_global) { 
       cod_muestra = stringr::str_squish(as.character(.data[[cols$col_cod]])), # Normalizar código de muestra.
       lab_destino_std = stringr::str_to_upper(stringr::str_squish(as.character(.data[[cols$col_labdest]]))) # Normalizar lab destino.
     ) %>% # Fin de mutate.
-    filter(!is.na(fecha_coleccion)) %>% # Filtrar filas con fecha válida.
+    filter(!is.na(fecha_coleccion)) %>% # Filtrar filas con fecha colección válida.
+    filter(!is.na(fecha_verificacion)) %>% # Filtrar filas con fecha verificación válida.
     filter(estatus_std == "RESULTADO VERIFICADO") %>% # Filtrar estatus verificado.
     filter(examen_key %in% examenes_key) %>% # Filtrar exámenes permitidos.
     mutate( # Crear clasificación.
@@ -287,7 +295,7 @@ build_dataset <- function(raw, cols, examenes_permitidos, lab_destino_global) { 
 } # Fin de build_dataset.
 
 setup_report_context <- function(dat, week_system, incluir_anio_en_carpeta) { # Configurar contexto del reporte.
-  fecha_max <- max(dat$fecha_coleccion, na.rm = TRUE) # Fecha máxima disponible.
+  fecha_max <- max(dat$fecha_verificacion, na.rm = TRUE) # Fecha máxima disponible.
   se_reporte <- if (week_system == "ISO") lubridate::isoweek(fecha_max) else lubridate::epiweek(fecha_max) # Semana de reporte.
   anio_rep <- if (week_system == "ISO") lubridate::isoyear(fecha_max) else lubridate::epiyear(fecha_max) # Año del reporte.
   carpeta <- if (incluir_anio_en_carpeta) sprintf("%d_SE %02d", anio_rep, se_reporte) else sprintf("SE %02d", se_reporte) # Nombre de carpeta.
@@ -318,8 +326,12 @@ create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_report
     tidyr::complete(se = 1:53, fill = list(NEGATIVO = 0, POSITIVO = 0)) %>% # Completar semanas.
     mutate(total = NEGATIVO + POSITIVO, IP = if_else(total > 0, 100 * POSITIVO / total, NA_real_)) %>% # Recalcular tras completar.
     ungroup() # Desagrupar.
-  sem_plot <- sem %>% filter(anio == g1_anio, se <= se_reporte) # Filtrar para gráfico.
-  if (!is.null(g1_se_inicio)) sem_plot <- sem_plot %>% filter(se >= g1_se_inicio) # Aplicar semana de inicio.
+  if (!is.null(g1_se_inicio) && se_reporte < g1_se_inicio) { # Cruce de año: usar tramo final del año previo.
+    sem_plot <- sem %>% filter((anio == g1_anio - 1 & se >= g1_se_inicio) | (anio == g1_anio & se <= se_reporte)) # Filtrar para gráfico.
+  } else { # Mismo año.
+    sem_plot <- sem %>% filter(anio == g1_anio, se <= se_reporte) # Filtrar para gráfico.
+    if (!is.null(g1_se_inicio)) sem_plot <- sem_plot %>% filter(se >= g1_se_inicio) # Aplicar semana de inicio.
+  } # Fin de condición.
   if (nrow(sem_plot) == 0) stop("Gráfico 1: el filtro dejó el dataset vacío (revisa año/SE inicio).") # Error si no hay datos.
   bars <- sem_plot %>% # Preparar barras.
     select(se, NEGATIVO, POSITIVO) %>% # Seleccionar columnas.
@@ -677,6 +689,19 @@ if (nrow(raw) == 0) stop("El archivo no contiene registros.") # Validación de d
 dat <- build_dataset(raw, cols, examenes_permitidos, lab_destino_global) # Construir dataset filtrado.
 
 dat <- add_epi(dat, "fecha_coleccion", week_system = week_system) # Agregar SE y año.
+if (week_system == "ISO") { # Crear SE/año con ISO.
+  dat <- dat %>% # Agregar SE y año de verificación.
+    mutate( # Crear columnas de verificación.
+      se_verif = lubridate::isoweek(fecha_verificacion), # SE verificación.
+      anio_verif = lubridate::isoyear(fecha_verificacion) # Año verificación.
+    ) # Fin de mutate.
+} else { # Crear SE/año con MMWR.
+  dat <- dat %>% # Agregar SE y año de verificación.
+    mutate( # Crear columnas de verificación.
+      se_verif = lubridate::epiweek(fecha_verificacion), # SE verificación.
+      anio_verif = lubridate::epiyear(fecha_verificacion) # Año verificación.
+    ) # Fin de mutate.
+} # Fin de condición.
 
 context <- setup_report_context(dat, week_system, incluir_anio_en_carpeta) # Configurar carpeta y SE.
 
@@ -684,18 +709,28 @@ se_reporte <- context$se_reporte # Semana de reporte.
 anio_rep <- context$anio_rep # Año de reporte.
 carpeta <- context$carpeta # Carpeta de salida.
 
+dat <- dat %>% # Filtrar por semana de verificación del reporte.
+  filter(se_verif == se_reporte, anio_verif == anio_rep) # Mantener solo verificados en la SE del reporte.
+
+if (nrow(dat) == 0) stop("No hay registros verificados en la SE del reporte (Fecha Verificación).") # Validar datos tras filtro.
+
+se_reporte_coleccion <- max(dat$se, na.rm = TRUE) # Semana máxima según Fecha Colección.
+anio_coleccion_rep <- max(dat$anio, na.rm = TRUE) # Año máximo según Fecha Colección.
+
 # Resolver AUTO en configuraciones # Comentario de paso.
-g1_anio <- resolve_auto(g1_anio, anio_rep) # Resolver año gráfico 1.
-g2_anio <- resolve_auto(g2_anio, anio_rep) # Resolver año gráfico 2.
-tabprov_anio <- resolve_auto(tabprov_anio, anio_rep) # Resolver año tabla provincia.
-tabse_anio <- resolve_auto(tabse_anio, anio_rep) # Resolver año tabla SE.
-tabse_se <- resolve_auto(tabse_se, se_reporte) # Resolver semana tabla SE.
+g1_anio <- resolve_auto(g1_anio, anio_coleccion_rep) # Resolver año gráfico 1.
+g2_anio <- resolve_auto(g2_anio, anio_coleccion_rep) # Resolver año gráfico 2.
+g2_se_inicio <- resolve_auto(g2_se_inicio, se_reporte_coleccion) # Resolver semana inicio gráfico 2.
+g2_se_fin <- resolve_auto(g2_se_fin, se_reporte_coleccion) # Resolver semana fin gráfico 2.
+tabprov_anio <- resolve_auto(tabprov_anio, anio_coleccion_rep) # Resolver año tabla provincia.
+tabse_anio <- resolve_auto(tabse_anio, anio_coleccion_rep) # Resolver año tabla SE.
+tabse_se <- resolve_auto(tabse_se, se_reporte_coleccion) # Resolver semana tabla SE.
 
 # --------------------------- # Separador de sección.
 # 5) GRÁFICO 1 # Generar gráfico 1.
 # --------------------------- # Separador visual.
 
-graph1 <- create_graph1(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_reporte, carpeta, week_system) # Crear gráfico 1.
+graph1 <- create_graph1(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_reporte_coleccion, carpeta, week_system) # Crear gráfico 1.
 sem_plot <- graph1$sem_plot # Guardar sem_plot.
 out_g1 <- graph1$out_g1 # Ruta gráfico 1.
 
@@ -720,7 +755,8 @@ tabla_se_final <- create_table_se(dat, cols$col_micro, cols$col_estab, tabse_ani
 # --------------------------- # Separador visual.
 
 message("OK. Carpeta del reporte: ", carpeta) # Mensaje carpeta.
-message("SE del reporte (según max Fecha Colección): SE ", sprintf("%02d", se_reporte), " - Año ", anio_rep) # Mensaje SE/año.
+message("SE del reporte (según max Fecha Verificación): SE ", sprintf("%02d", se_reporte), " - Año ", anio_rep) # Mensaje SE/año.
+message("SE máxima en datos (según Fecha Colección): SE ", sprintf("%02d", se_reporte_coleccion), " - Año ", anio_coleccion_rep) # Mensaje SE colección.
 message("Gráfico 1: ", out_g1) # Mensaje gráfico 1.
 message("Gráfico 2: ", out_g2) # Mensaje gráfico 2.
 message("Listo.") # Mensaje final.
