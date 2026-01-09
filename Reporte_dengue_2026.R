@@ -232,6 +232,7 @@ load_raw_data <- function(archivo, hoja) { # Función para leer Excel.
 
 detect_columns <- function(raw) { # Detectar columnas requeridas y opcionales.
   col_fecha <- must_col(raw, c("Fecha Colección", "Fecha Coleccion"), "Fecha de colección") # Columna fecha.
+  col_fecha_verif <- must_col(raw, c("Fecha Verificación", "Fecha Verificacion"), "Fecha de verificación") # Columna fecha verificación.
   col_result <- must_col(raw, c("resultado"), "Resultado") # Columna resultado.
   col_examen <- must_col(raw, c("nombre de examen", "examen"), "Examen") # Columna examen.
   col_estatus <- must_col(raw, c("estatus resultado", "estado resultado", "estatus"), "Estatus") # Columna estatus.
@@ -242,6 +243,7 @@ detect_columns <- function(raw) { # Detectar columnas requeridas y opcionales.
   col_estab <- find_col(raw, c("Establecimiento de Origen", "IPRESS Origen", "Origen")) # Columna establecimiento.
   list( # Retornar lista de columnas.
     col_fecha = col_fecha, # Fecha.
+    col_fecha_verif = col_fecha_verif, # Fecha verificación.
     col_result = col_result, # Resultado.
     col_examen = col_examen, # Examen.
     col_estatus = col_estatus, # Estatus.
@@ -258,6 +260,7 @@ build_dataset <- function(raw, cols, examenes_permitidos, lab_destino_global) { 
   dat <- raw %>% # Iniciar pipeline.
     mutate( # Crear columnas estándar.
       fecha_coleccion = parse_excel_date(.data[[cols$col_fecha]]), # Parsear fecha.
+      fecha_verificacion = parse_excel_date(.data[[cols$col_fecha_verif]]), # Parsear fecha verificación.
       resultado_std = stringr::str_to_upper(stringr::str_squish(as.character(.data[[cols$col_result]]))), # Normalizar resultado.
       examen_std = stringr::str_to_upper(stringr::str_squish(as.character(.data[[cols$col_examen]]))), # Normalizar examen.
       examen_key = norm_txt(examen_std), # Normalizar examen para comparación.
@@ -265,7 +268,8 @@ build_dataset <- function(raw, cols, examenes_permitidos, lab_destino_global) { 
       cod_muestra = stringr::str_squish(as.character(.data[[cols$col_cod]])), # Normalizar código de muestra.
       lab_destino_std = stringr::str_to_upper(stringr::str_squish(as.character(.data[[cols$col_labdest]]))) # Normalizar lab destino.
     ) %>% # Fin de mutate.
-    filter(!is.na(fecha_coleccion)) %>% # Filtrar filas con fecha válida.
+    filter(!is.na(fecha_coleccion)) %>% # Filtrar filas con fecha colección válida.
+    filter(!is.na(fecha_verificacion)) %>% # Filtrar filas con fecha verificación válida.
     filter(estatus_std == "RESULTADO VERIFICADO") %>% # Filtrar estatus verificado.
     filter(examen_key %in% examenes_key) %>% # Filtrar exámenes permitidos.
     mutate( # Crear clasificación.
@@ -287,7 +291,7 @@ build_dataset <- function(raw, cols, examenes_permitidos, lab_destino_global) { 
 } # Fin de build_dataset.
 
 setup_report_context <- function(dat, week_system, incluir_anio_en_carpeta) { # Configurar contexto del reporte.
-  fecha_max <- max(dat$fecha_coleccion, na.rm = TRUE) # Fecha máxima disponible.
+  fecha_max <- max(dat$fecha_verificacion, na.rm = TRUE) # Fecha máxima disponible.
   se_reporte <- if (week_system == "ISO") lubridate::isoweek(fecha_max) else lubridate::epiweek(fecha_max) # Semana de reporte.
   anio_rep <- if (week_system == "ISO") lubridate::isoyear(fecha_max) else lubridate::epiyear(fecha_max) # Año del reporte.
   carpeta <- if (incluir_anio_en_carpeta) sprintf("%d_SE %02d", anio_rep, se_reporte) else sprintf("SE %02d", se_reporte) # Nombre de carpeta.
@@ -677,6 +681,11 @@ if (nrow(raw) == 0) stop("El archivo no contiene registros.") # Validación de d
 dat <- build_dataset(raw, cols, examenes_permitidos, lab_destino_global) # Construir dataset filtrado.
 
 dat <- add_epi(dat, "fecha_coleccion", week_system = week_system) # Agregar SE y año.
+dat <- dat %>% # Agregar SE y año de verificación.
+  mutate( # Crear columnas de verificación.
+    se_verif = if_else(week_system == "ISO", lubridate::isoweek(fecha_verificacion), lubridate::epiweek(fecha_verificacion)), # SE verificación.
+    anio_verif = if_else(week_system == "ISO", lubridate::isoyear(fecha_verificacion), lubridate::epiyear(fecha_verificacion)) # Año verificación.
+  ) # Fin de mutate.
 
 context <- setup_report_context(dat, week_system, incluir_anio_en_carpeta) # Configurar carpeta y SE.
 
@@ -684,18 +693,26 @@ se_reporte <- context$se_reporte # Semana de reporte.
 anio_rep <- context$anio_rep # Año de reporte.
 carpeta <- context$carpeta # Carpeta de salida.
 
+dat <- dat %>% # Filtrar por semana de verificación del reporte.
+  filter(se_verif == se_reporte, anio_verif == anio_rep) # Mantener solo verificados en la SE del reporte.
+
+if (nrow(dat) == 0) stop("No hay registros verificados en la SE del reporte (Fecha Verificación).") # Validar datos tras filtro.
+
+se_reporte_coleccion <- max(dat$se, na.rm = TRUE) # Semana máxima según Fecha Colección.
+anio_coleccion_rep <- max(dat$anio, na.rm = TRUE) # Año máximo según Fecha Colección.
+
 # Resolver AUTO en configuraciones # Comentario de paso.
-g1_anio <- resolve_auto(g1_anio, anio_rep) # Resolver año gráfico 1.
-g2_anio <- resolve_auto(g2_anio, anio_rep) # Resolver año gráfico 2.
-tabprov_anio <- resolve_auto(tabprov_anio, anio_rep) # Resolver año tabla provincia.
-tabse_anio <- resolve_auto(tabse_anio, anio_rep) # Resolver año tabla SE.
-tabse_se <- resolve_auto(tabse_se, se_reporte) # Resolver semana tabla SE.
+g1_anio <- resolve_auto(g1_anio, anio_coleccion_rep) # Resolver año gráfico 1.
+g2_anio <- resolve_auto(g2_anio, anio_coleccion_rep) # Resolver año gráfico 2.
+tabprov_anio <- resolve_auto(tabprov_anio, anio_coleccion_rep) # Resolver año tabla provincia.
+tabse_anio <- resolve_auto(tabse_anio, anio_coleccion_rep) # Resolver año tabla SE.
+tabse_se <- resolve_auto(tabse_se, se_reporte_coleccion) # Resolver semana tabla SE.
 
 # --------------------------- # Separador de sección.
 # 5) GRÁFICO 1 # Generar gráfico 1.
 # --------------------------- # Separador visual.
 
-graph1 <- create_graph1(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_reporte, carpeta, week_system) # Crear gráfico 1.
+graph1 <- create_graph1(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_reporte_coleccion, carpeta, week_system) # Crear gráfico 1.
 sem_plot <- graph1$sem_plot # Guardar sem_plot.
 out_g1 <- graph1$out_g1 # Ruta gráfico 1.
 
@@ -720,7 +737,8 @@ tabla_se_final <- create_table_se(dat, cols$col_micro, cols$col_estab, tabse_ani
 # --------------------------- # Separador visual.
 
 message("OK. Carpeta del reporte: ", carpeta) # Mensaje carpeta.
-message("SE del reporte (según max Fecha Colección): SE ", sprintf("%02d", se_reporte), " - Año ", anio_rep) # Mensaje SE/año.
+message("SE del reporte (según max Fecha Verificación): SE ", sprintf("%02d", se_reporte), " - Año ", anio_rep) # Mensaje SE/año.
+message("SE máxima en datos (según Fecha Colección): SE ", sprintf("%02d", se_reporte_coleccion), " - Año ", anio_coleccion_rep) # Mensaje SE colección.
 message("Gráfico 1: ", out_g1) # Mensaje gráfico 1.
 message("Gráfico 2: ", out_g2) # Mensaje gráfico 2.
 message("Listo.") # Mensaje final.
