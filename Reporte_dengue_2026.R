@@ -45,7 +45,7 @@ incluir_anio_en_carpeta <- FALSE
 
 # ------------- GRÁFICO 1 (IP% por SE - SEGÚN COLECCIÓN) -------------
 g1_anio <- "AUTO"
-g1_se_inicio <- "20"
+g1_se_inicio <- 20
 g1_unidad <- unidad_global
 
 # ------------- GRÁFICO 2 (Procesamiento acumulado 2026 - SEGÚN VERIFICACIÓN) -------------
@@ -326,8 +326,16 @@ carpeta <- if (incluir_anio_en_carpeta) sprintf("%d_SE %02d", anio_rep_colec, se
 dir.create(carpeta, showWarnings = FALSE, recursive = TRUE)
 
 # Resolver AUTO en configuraciones
+g1_anio_auto <- is.character(g1_anio) && length(g1_anio) == 1 && toupper(g1_anio) == "AUTO"
 g1_anio <- resolve_auto(g1_anio, anio_rep_colec)
 g1_se_inicio <- resolve_auto(g1_se_inicio, 1)
+if (!is.null(g1_se_inicio)) g1_se_inicio <- as.integer(g1_se_inicio)
+g1_incluir_anio_prev <- g1_anio_auto && !is.null(g1_se_inicio) && g1_se_inicio > se_reporte_colec
+if (g1_incluir_anio_prev) {
+  g1_anio <- sort(unique(c(anio_rep_colec - 1L, anio_rep_colec)))
+}
+g1_se_inicio_prev <- if (!is.null(g1_se_inicio)) g1_se_inicio else 1L
+g1_se_inicio_actual <- if (g1_incluir_anio_prev) 1L else g1_se_inicio_prev
 
 g2_se_fin <- resolve_auto(g2_se_fin, se_reporte_verif)
 
@@ -339,7 +347,7 @@ tabse_se <- resolve_auto(tabse_se, se_reporte_colec)
 # 5) GRÁFICO 1 (SEGÚN COLECCIÓN)
 # --------------------------- #
 
-create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_reporte_colec, carpeta, week_system) {
+create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio_actual, g1_se_inicio_prev, g1_unidad, se_reporte_colec, carpeta, week_system) {
   # Usar SE según colección
   base_g1 <- dat %>%
     filter(clasif %in% c("NEGATIVO", "POSITIVO")) %>%
@@ -356,6 +364,7 @@ create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_report
     count(anio, se, clasif, name = "n") %>%
     tidyr::pivot_wider(names_from = clasif, values_from = n, values_fill = 0) %>%
     mutate(total = NEGATIVO + POSITIVO, IP = if_else(total > 0, 100 * POSITIVO / total, NA_real_)) %>%
+    filter(anio %in% g1_anio) %>%
     arrange(anio, se) %>%
     group_by(anio) %>%
     tidyr::complete(se = 1:53, fill = list(NEGATIVO = 0, POSITIVO = 0)) %>%
@@ -364,11 +373,10 @@ create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_report
   
   max_anio_g1 <- max(g1_anio, na.rm = TRUE)
   sem_plot <- sem %>%
-    filter(anio < max_anio_g1 | (anio == max_anio_g1 & se <= se_reporte_colec))
-  
-  if (!is.null(g1_se_inicio)) {
-    sem_plot <- sem_plot %>% filter(anio < max_anio_g1 | se >= g1_se_inicio)
-  }
+    filter(
+      (anio < max_anio_g1 & se >= g1_se_inicio_prev) |
+        (anio == max_anio_g1 & se <= se_reporte_colec & se >= g1_se_inicio_actual)
+    )
   
   if (nrow(sem_plot) == 0) stop("Gráfico 1: el filtro dejó el dataset vacío (revisa año/SE inicio).")
   
@@ -442,7 +450,7 @@ create_graph1 <- function(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_report
   list(sem_plot = sem_plot, out_g1 = out_g1)
 }
 
-graph1 <- create_graph1(dat, cols, g1_anio, g1_se_inicio, g1_unidad, se_reporte_colec, carpeta, week_system)
+graph1 <- create_graph1(dat, cols, g1_anio, g1_se_inicio_actual, g1_se_inicio_prev, g1_unidad, se_reporte_colec, carpeta, week_system)
 sem_plot <- graph1$sem_plot
 out_g1 <- graph1$out_g1
 
@@ -450,8 +458,8 @@ out_g1 <- graph1$out_g1
 # 6) GRÁFICO 2 (ACUMULADO 2026 - SEGÚN VERIFICACIÓN)
 # --------------------------- #
 
-create_graph2 <- function(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs, g2_lab_solo, g2_unidad, carpeta) {
-  dat_g2 <- dat %>%
+create_graph2 <- function(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs, g2_lab_solo, g2_unidad, carpeta, anio_rep_verif) {
+  dat_g2_base <- dat %>%
     mutate(
       prueba = case_when(
         str_detect(examen_key, "ac\\.?\\s*igm") ~ "Virus Dengue Ac. IgM",
@@ -464,11 +472,37 @@ create_graph2 <- function(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs
     ) %>%
     filter(clasif %in% c("NEGATIVO", "POSITIVO"))
   
-  # Aplicar filtros: año 2026 completo
-  dat_g2 <- apply_filters(dat_g2, anio_sel = g2_anio, se_inicio = g2_se_inicio, se_fin = g2_se_fin, 
-                          labs_excluir = g2_excluir_labs, labs_solo = g2_lab_solo)
+  aplicar_filtros_g2 <- function(data, anio_sel) {
+    apply_filters(
+      data,
+      anio_sel = anio_sel,
+      se_inicio = g2_se_inicio,
+      se_fin = g2_se_fin,
+      labs_excluir = g2_excluir_labs,
+      labs_solo = g2_lab_solo
+    )
+  }
   
-  if (nrow(dat_g2) == 0) stop("Gráfico 2: no quedan datos tras filtros (año/SE/labs).")
+  g2_anio_efectivo <- g2_anio
+  dat_g2 <- aplicar_filtros_g2(dat_g2_base, g2_anio_efectivo)
+  
+  if (nrow(dat_g2) == 0 && !is.null(anio_rep_verif) && anio_rep_verif != g2_anio_efectivo) {
+    dat_g2_alt <- aplicar_filtros_g2(dat_g2_base, anio_rep_verif)
+    if (nrow(dat_g2_alt) > 0) {
+      dat_g2 <- dat_g2_alt
+      g2_anio_efectivo <- anio_rep_verif
+    }
+  }
+  
+  if (nrow(dat_g2) == 0) {
+    warning("Gráfico 2: no quedan datos tras filtros (año/SE/labs). Se generará un gráfico vacío.")
+    p2 <- ggplot() +
+      annotate("text", x = 0, y = 0, label = "Sin datos para el gráfico 2", size = 7, fontface = "bold") +
+      theme_void()
+    out_g2 <- file.path(carpeta, "02_Procesamiento_por_prueba_HighImpact.png")
+    ggsave(out_g2, p2, width = 16, height = 9, dpi = 300)
+    return(list(out_g2 = out_g2, res_g2 = tibble(), dat_g2 = dat_g2, g2_anio_efectivo = g2_anio_efectivo))
+  }
   
   base_g2 <- if (g2_unidad == "muestra") dedup_by_unit(dat_g2, "muestra") else dat_g2
   
@@ -489,7 +523,7 @@ create_graph2 <- function(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs
   se_max_2026 <- max(dat_g2$se, na.rm = TRUE)
   
   subtitulo_dinamico <- sprintf("Acumulado año %d (SE %02d a SE %02d según verificación)", 
-                                g2_anio, se_min_2026, se_max_2026)
+                                g2_anio_efectivo, se_min_2026, se_max_2026)
   
   p2 <- ggplot() +
     geom_col(data = bars_g2, aes(x = prueba, y = n, fill = tipo), position = position_dodge(width = 0.8), width = 0.7) +
@@ -501,7 +535,7 @@ create_graph2 <- function(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs
     scale_fill_manual(values = c("NEGATIVO" = "#1F77B4", "POSITIVO" = "#D62728")) +
     scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.2))) +
     labs(x = NULL, y = "NÚMERO DE PRUEBAS", fill = NULL, 
-         title = "PROCESAMIENTO DE MUESTRAS POR TIPO DE PRUEBA - ACUMULADO 2026",
+         title = sprintf("PROCESAMIENTO DE MUESTRAS POR TIPO DE PRUEBA - ACUMULADO %d", g2_anio_efectivo),
          subtitle = subtitulo_dinamico) +
     theme_minimal(base_size = 18) +
     theme(legend.position = "top", panel.grid.major.x = element_blank(), 
@@ -513,10 +547,10 @@ create_graph2 <- function(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs
   out_g2 <- file.path(carpeta, "02_Procesamiento_por_prueba_HighImpact.png")
   ggsave(out_g2, p2, width = 16, height = 9, dpi = 300)
   
-  list(out_g2 = out_g2, res_g2 = res_g2, dat_g2 = dat_g2)
+  list(out_g2 = out_g2, res_g2 = res_g2, dat_g2 = dat_g2, g2_anio_efectivo = g2_anio_efectivo)
 }
 
-graph2 <- create_graph2(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs, g2_lab_solo, g2_unidad, carpeta)
+graph2 <- create_graph2(dat, g2_anio, g2_se_inicio, g2_se_fin, g2_excluir_labs, g2_lab_solo, g2_unidad, carpeta, anio_rep_verif)
 out_g2 <- graph2$out_g2
 res_g2 <- graph2$res_g2
 
@@ -549,7 +583,10 @@ create_table_prov <- function(dat, col_prov, tabprov_anio, tabprov_se_inicio, ta
                                se_fin = tabprov_se_fin, labs_excluir = tabprov_excluir_labs, 
                                labs_solo = tabprov_lab_solo)
   
-  if (nrow(dat_tabprov) == 0) stop("Tabla provincia: no quedan datos tras filtros.")
+  if (nrow(dat_tabprov) == 0) {
+    warning("Tabla provincia: no quedan datos tras filtros. Se omite la tabla.")
+    return(tibble())
+  }
   
   # Filtrar solo positivos
   base_pos <- dat_tabprov %>% filter(clasif == "POSITIVO")
