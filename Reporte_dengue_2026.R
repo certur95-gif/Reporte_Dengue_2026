@@ -583,7 +583,10 @@ create_table_prov <- function(dat, col_prov, tabprov_anio, tabprov_se_inicio, ta
                                se_fin = tabprov_se_fin, labs_excluir = tabprov_excluir_labs, 
                                labs_solo = tabprov_lab_solo)
   
-  if (nrow(dat_tabprov) == 0) stop("Tabla provincia: no quedan datos tras filtros.")
+  if (nrow(dat_tabprov) == 0) {
+    warning("Tabla provincia: no quedan datos tras filtros. Se omite la tabla.")
+    return(tibble())
+  }
   
   # Filtrar solo positivos
   base_pos <- dat_tabprov %>% filter(clasif == "POSITIVO")
